@@ -73,18 +73,5 @@ Every rule includes a `message` with concrete before/after Go code examples and 
 
 5. **Review violations** — the analyzer will flag nginx-ingress patterns in the Go source files.
 
-6. **Use KAI** — click "Get Solution" on any violation. KAI sends the rule's message (with before/after examples) to the LLM, which generates the Gateway API equivalent code.
+6. **Use KAI** — click "Get Solution" on any violation. KAI sends the rule's message (with before/after examples) to the LLM, which generates the Gateway API equivalent code. 
 
-7. **Iterate** — if the LLM output quality is poor for a particular rule, tune the `message` text in the rule YAML and re-run analysis.
-
-## Rule Conventions
-
-Rules follow the Konveyor [rule format](https://github.com/konveyor/analyzer-lsp/blob/main/docs/rules.md):
-
-- **Rule IDs**: `ingress-nginx-go-ref-{number}`
-- **Labels**: `konveyor.io/source=go`, `konveyor.io/target=go`
-- **Category**: `mandatory` for patterns with native Gateway API equivalents, `optional` for patterns that require implementation-specific policies
-- **Effort**: 1 (simple annotation removal) to 5 (snippet refactoring with no direct equivalent)
-- **Message**: must include concrete migration guidance with Go code examples — KAI uses this as the LLM prompt
-
-Rules that only use `tag` actions or omit `effort` will not generate KAI violations.
