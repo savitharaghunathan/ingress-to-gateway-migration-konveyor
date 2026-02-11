@@ -1,0 +1,911 @@
+# Go provider rules — require the Konveyor Go extension to be active.
+# These detect Go source code that uses Kubernetes Ingress types and
+# nginx-ingress patterns, and guide migration to Gateway API types.
+
+# -------------------------------------------------------------------
+# Group 1: Type references — Ingress core types
+# -------------------------------------------------------------------
+
+- ruleID: ingress-nginx-go-ref-00001
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 3
+  category: mandatory
+  description: "Go code references networkingv1.Ingress type"
+  when:
+    go.referenced:
+      pattern: "k8s.io/api/networking/v1.Ingress"
+  message: |
+    This code references `networkingv1.Ingress`. Ingress-NGINX is being retired
+    in March 2026 with no further security patches.
+
+    In Gateway API, a single Ingress resource is split into two resources:
+    - `Gateway` — defines the listener/entrypoint (managed by cluster operators)
+    - `HTTPRoute` — defines routing rules (managed by application developers)
+
+    Replace:
+      import networkingv1 "k8s.io/api/networking/v1"
+      var ing *networkingv1.Ingress
+
+    With:
+      import gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+      var route *gatewayv1.HTTPRoute
+
+    You can use the `ingress2gateway` tool to automate initial conversion:
+      https://github.com/kubernetes-sigs/ingress2gateway
+
+    You can run a Gateway API controller alongside your existing Ingress-NGINX
+    controller during migration. Each gets a separate external IP, enabling
+    isolated testing without impacting production.
+  links:
+    - url: "https://gateway-api.sigs.k8s.io/guides/getting-started/migrating-from-ingress/"
+      title: "Migrating from Ingress to Gateway API"
+    - url: "https://gateway-api.sigs.k8s.io/api-types/httproute/"
+      title: "HTTPRoute API Reference"
+
+- ruleID: ingress-nginx-go-ref-00002
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 3
+  category: mandatory
+  description: "Go code references networkingv1.IngressSpec type"
+  when:
+    go.referenced:
+      pattern: "k8s.io/api/networking/v1.IngressSpec"
+  message: |
+    This code references `networkingv1.IngressSpec`. Migrate to
+    `gatewayv1.HTTPRouteSpec`.
+
+    Key differences:
+    - IngressSpec.Rules            -> HTTPRouteSpec.Rules
+    - IngressSpec.TLS              -> Defined on Gateway.Spec.Listeners instead
+    - IngressSpec.IngressClassName  -> HTTPRouteSpec.ParentRefs (references a Gateway)
+    - IngressSpec.DefaultBackend   -> Use an explicit HTTPRouteRule with PathPrefix "/"
+
+    Replace:
+      spec := networkingv1.IngressSpec{
+          IngressClassName: &className,
+          Rules: []networkingv1.IngressRule{...},
+          TLS:   []networkingv1.IngressTLS{...},
+      }
+
+    With:
+      spec := gatewayv1.HTTPRouteSpec{
+          CommonRouteSpec: gatewayv1.CommonRouteSpec{
+              ParentRefs: []gatewayv1.ParentReference{
+                  {Name: gatewayv1.ObjectName("my-gateway")},
+              },
+          },
+          Hostnames: []gatewayv1.Hostname{"example.com"},
+          Rules:     []gatewayv1.HTTPRouteRule{...},
+      }
+
+    Note: In Ingress, entry points (HTTP/HTTPS) are implicit. In Gateway API,
+    entry points must be explicitly defined as listeners on the Gateway resource.
+  links:
+    - url: "https://gateway-api.sigs.k8s.io/api-types/httproute/"
+      title: "HTTPRoute API Reference"
+
+- ruleID: ingress-nginx-go-ref-00003
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: mandatory
+  description: "Go code references networkingv1.IngressRule type"
+  when:
+    go.referenced:
+      pattern: "k8s.io/api/networking/v1.IngressRule"
+  message: |
+    This code references `networkingv1.IngressRule`. Migrate to
+    `gatewayv1.HTTPRouteRule`.
+
+    Per the official migration guide:
+    - IngressRule.Host moves to HTTPRoute.Spec.Hostnames
+    - IngressRule.HTTP.Paths becomes HTTPRouteRule.Matches + BackendRefs
+    - In Ingress, each host has separate rules; in Gateway API, routing rules
+      apply to all hostnames listed on the HTTPRoute
+
+    Replace:
+      rule := networkingv1.IngressRule{
+          Host: "foo.example.com",
+          IngressRuleValue: networkingv1.IngressRuleValue{
+              HTTP: &networkingv1.HTTPIngressRuleValue{
+                  Paths: []networkingv1.HTTPIngressPath{
+                      {
+                          Path:     "/",
+                          PathType: &pathTypePrefix,
+                          Backend: networkingv1.IngressBackend{
+                              Service: &networkingv1.IngressServiceBackend{
+                                  Name: "foo-app",
+                                  Port: networkingv1.ServiceBackendPort{Number: 80},
+                              },
+                          },
+                      },
+                  },
+              },
+          },
+      }
+
+    With an HTTPRoute:
+      route := &gatewayv1.HTTPRoute{
+          Spec: gatewayv1.HTTPRouteSpec{
+              CommonRouteSpec: gatewayv1.CommonRouteSpec{
+                  ParentRefs: []gatewayv1.ParentReference{
+                      {Name: "my-gateway"},
+                  },
+              },
+              Hostnames: []gatewayv1.Hostname{"foo.example.com"},
+              Rules: []gatewayv1.HTTPRouteRule{
+                  {
+                      Matches: []gatewayv1.HTTPRouteMatch{
+                          {Path: &gatewayv1.HTTPPathMatch{
+                              Type:  ptr(gatewayv1.PathMatchPathPrefix),
+                              Value: ptr("/"),
+                          }},
+                      },
+                      BackendRefs: []gatewayv1.HTTPBackendRef{
+                          {BackendRef: gatewayv1.BackendRef{
+                              BackendObjectReference: gatewayv1.BackendObjectReference{
+                                  Name: "foo-app",
+                                  Port: ptr(gatewayv1.PortNumber(80)),
+                              },
+                          }},
+                      },
+                  },
+              },
+          },
+      }
+  links:
+    - url: "https://gateway-api.sigs.k8s.io/guides/getting-started/migrating-from-ingress/"
+      title: "Migrating from Ingress to Gateway API"
+
+- ruleID: ingress-nginx-go-ref-00004
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: mandatory
+  description: "Go code references networkingv1.IngressTLS type"
+  when:
+    go.referenced:
+      pattern: "k8s.io/api/networking/v1.IngressTLS"
+  message: |
+    This code references `networkingv1.IngressTLS`. In Gateway API, TLS
+    configuration moves from the route to the Gateway listener. This is a
+    fundamental architectural change: TLS is now managed by infrastructure
+    operators (Gateway) rather than application developers (HTTPRoute).
+
+    Replace:
+      tls := networkingv1.IngressTLS{
+          Hosts:      []string{"example.com"},
+          SecretName: "example-com-tls",
+      }
+
+    With a Gateway listener (per the official migration guide):
+      listener := gatewayv1.Listener{
+          Name:     "https",
+          Port:     443,
+          Protocol: gatewayv1.HTTPSProtocolType,
+          Hostname: ptr(gatewayv1.Hostname("*.example.com")),
+          TLS: &gatewayv1.GatewayTLSConfig{
+              Mode: ptr(gatewayv1.TLSModeTerminate),
+              CertificateRefs: []gatewayv1.SecretObjectReference{
+                  {Name: "example-com-tls"},
+              },
+          },
+      }
+
+    In Ingress, TLS entry points are implicit. In Gateway API, you must
+    explicitly define HTTPS listeners on the Gateway resource.
+  links:
+    - url: "https://gateway-api.sigs.k8s.io/api-types/gateway/"
+      title: "Gateway API Gateway Reference"
+
+- ruleID: ingress-nginx-go-ref-00005
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: mandatory
+  description: "Go code references networkingv1.IngressClass type"
+  when:
+    go.referenced:
+      pattern: "k8s.io/api/networking/v1.IngressClass"
+  message: |
+    This code references `networkingv1.IngressClass`. Migrate to
+    `gatewayv1.GatewayClass`.
+
+    Replace:
+      ingressClass := &networkingv1.IngressClass{
+          ObjectMeta: metav1.ObjectMeta{Name: "nginx"},
+          Spec: networkingv1.IngressClassSpec{
+              Controller: "k8s.io/ingress-nginx",
+          },
+      }
+
+    With:
+      gatewayClass := &gatewayv1.GatewayClass{
+          ObjectMeta: metav1.ObjectMeta{Name: "my-gateway-class"},
+          Spec: gatewayv1.GatewayClassSpec{
+              ControllerName: "example.com/gateway-controller",
+          },
+      }
+  links:
+    - url: "https://gateway-api.sigs.k8s.io/api-types/gatewayclass/"
+      title: "GatewayClass API Reference"
+
+- ruleID: ingress-nginx-go-ref-00006
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: mandatory
+  description: "Go code references networkingv1.IngressBackend type"
+  when:
+    go.referenced:
+      pattern: "k8s.io/api/networking/v1.IngressBackend"
+  message: |
+    This code references `networkingv1.IngressBackend`. Migrate to
+    `gatewayv1.HTTPBackendRef`.
+
+    Replace:
+      backend := networkingv1.IngressBackend{
+          Service: &networkingv1.IngressServiceBackend{
+              Name: "my-service",
+              Port: networkingv1.ServiceBackendPort{Number: 8080},
+          },
+      }
+
+    With:
+      backendRef := gatewayv1.HTTPBackendRef{
+          BackendRef: gatewayv1.BackendRef{
+              BackendObjectReference: gatewayv1.BackendObjectReference{
+                  Name: gatewayv1.ObjectName("my-service"),
+                  Port: ptr(gatewayv1.PortNumber(8080)),
+              },
+          },
+      }
+  links:
+    - url: "https://gateway-api.sigs.k8s.io/api-types/httproute/"
+      title: "HTTPRoute BackendRef Reference"
+
+- ruleID: ingress-nginx-go-ref-00007
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: mandatory
+  description: "Go code references networkingv1.HTTPIngressPath type"
+  when:
+    go.referenced:
+      pattern: "k8s.io/api/networking/v1.HTTPIngressPath"
+  message: |
+    This code references `networkingv1.HTTPIngressPath`. Migrate to
+    `gatewayv1.HTTPRouteMatch` + `gatewayv1.HTTPBackendRef`.
+
+    In Ingress, a path combines matching and backend in one struct.
+    In Gateway API, these are separate fields on HTTPRouteRule:
+
+    Replace:
+      path := networkingv1.HTTPIngressPath{
+          Path:     "/api",
+          PathType: &pathTypePrefix,
+          Backend:  networkingv1.IngressBackend{...},
+      }
+
+    With:
+      rule := gatewayv1.HTTPRouteRule{
+          Matches: []gatewayv1.HTTPRouteMatch{
+              {Path: &gatewayv1.HTTPPathMatch{
+                  Type:  ptr(gatewayv1.PathMatchPathPrefix),
+                  Value: ptr("/api"),
+              }},
+          },
+          BackendRefs: []gatewayv1.HTTPBackendRef{...},
+      }
+
+- ruleID: ingress-nginx-go-ref-00008
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: mandatory
+  description: "Go code references networkingv1.HTTPIngressRuleValue type"
+  when:
+    go.referenced:
+      pattern: "k8s.io/api/networking/v1.HTTPIngressRuleValue"
+  message: |
+    This code references `networkingv1.HTTPIngressRuleValue`. This type has
+    no direct Gateway API equivalent. The HTTP paths list becomes
+    `gatewayv1.HTTPRouteRule` entries directly on the HTTPRoute.
+
+    Replace:
+      ruleValue := networkingv1.IngressRuleValue{
+          HTTP: &networkingv1.HTTPIngressRuleValue{
+              Paths: []networkingv1.HTTPIngressPath{...},
+          },
+      }
+
+    With HTTPRouteRules on the HTTPRoute:
+      rules := []gatewayv1.HTTPRouteRule{
+          {
+              Matches:     []gatewayv1.HTTPRouteMatch{...},
+              BackendRefs: []gatewayv1.HTTPBackendRef{...},
+          },
+      }
+
+# -------------------------------------------------------------------
+# Group 3: Client-go Ingress API calls
+# -------------------------------------------------------------------
+
+- ruleID: ingress-nginx-go-ref-00010
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 3
+  category: mandatory
+  description: "Go code calls NetworkingV1().Ingresses() client-go API"
+  when:
+    builtin.filecontent:
+      pattern: '\.NetworkingV1\(\)\.Ingresses\('
+      filePattern: "*.go"
+  message: |
+    This code uses the client-go `NetworkingV1().Ingresses()` API to manage
+    Ingress resources. Migrate to the Gateway API client.
+
+    Install the Gateway API client:
+      go get sigs.k8s.io/gateway-api@latest
+
+    Use the dynamic client or the typed Gateway API client:
+
+      import (
+          gatewayv1client "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
+      )
+
+      gwClient, err := gatewayv1client.NewForConfig(config)
+
+      // Create HTTPRoute
+      gwClient.GatewayV1().HTTPRoutes(namespace).Create(ctx, httpRoute, metav1.CreateOptions{})
+
+      // List HTTPRoutes
+      gwClient.GatewayV1().HTTPRoutes(namespace).List(ctx, metav1.ListOptions{})
+
+      // Create Gateway
+      gwClient.GatewayV1().Gateways(namespace).Create(ctx, gateway, metav1.CreateOptions{})
+
+    Replace each Ingresses() call:
+      .Ingresses(ns).Create()   -> .HTTPRoutes(ns).Create()
+      .Ingresses(ns).Update()   -> .HTTPRoutes(ns).Update()
+      .Ingresses(ns).Delete()   -> .HTTPRoutes(ns).Delete()
+      .Ingresses(ns).Get()      -> .HTTPRoutes(ns).Get()
+      .Ingresses(ns).List()     -> .HTTPRoutes(ns).List()
+  links:
+    - url: "https://pkg.go.dev/sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
+      title: "Gateway API Go Client"
+
+- ruleID: ingress-nginx-go-ref-00011
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: mandatory
+  description: "Go code calls NetworkingV1().IngressClasses() client-go API"
+  when:
+    builtin.filecontent:
+      pattern: '\.NetworkingV1\(\)\.IngressClasses\('
+      filePattern: "*.go"
+  message: |
+    This code uses the client-go `NetworkingV1().IngressClasses()` API.
+    Migrate to `GatewayV1().GatewayClasses()`.
+
+    Replace:
+      clientset.NetworkingV1().IngressClasses().Create(ctx, ingressClass, opts)
+      clientset.NetworkingV1().IngressClasses().Get(ctx, "nginx", opts)
+
+    With:
+      gwClient.GatewayV1().GatewayClasses().Create(ctx, gatewayClass, opts)
+      gwClient.GatewayV1().GatewayClasses().Get(ctx, "my-class", opts)
+
+# -------------------------------------------------------------------
+# Group 4: Nginx-specific annotation string literals in Go code
+# -------------------------------------------------------------------
+
+- ruleID: ingress-nginx-go-ref-00020
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 3
+  category: mandatory
+  description: "Go code sets nginx rewrite-target or use-regex annotation"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/(rewrite-target|use-regex)'
+      filePattern: "*.go"
+  message: |
+    This code sets the `nginx.ingress.kubernetes.io/rewrite-target` annotation.
+    Migrate to HTTPRoute's `URLRewrite` filter.
+
+    Replace the annotation with an HTTPRoute filter:
+      rule := gatewayv1.HTTPRouteRule{
+          Matches: []gatewayv1.HTTPRouteMatch{...},
+          Filters: []gatewayv1.HTTPRouteFilter{
+              {
+                  Type: gatewayv1.HTTPRouteFilterURLRewrite,
+                  URLRewrite: &gatewayv1.HTTPURLRewriteFilter{
+                      Path: &gatewayv1.HTTPPathModifier{
+                          Type:               gatewayv1.PrefixMatchHTTPPathModifier,
+                          ReplacePrefixMatch: ptr("/"),
+                      },
+                  },
+              },
+          },
+          BackendRefs: []gatewayv1.HTTPBackendRef{...},
+      }
+
+    Also remove the `use-regex` annotation — Gateway API uses typed path
+    matching (PathPrefix, Exact) instead of a regex annotation.
+
+    Remove these annotations from the Annotations map entirely.
+
+- ruleID: ingress-nginx-go-ref-00021
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 1
+  category: mandatory
+  description: "Go code sets nginx ssl-redirect, force-ssl-redirect, or ssl-passthrough annotation"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/(ssl-redirect|force-ssl-redirect|ssl-passthrough)'
+      filePattern: "*.go"
+  message: |
+    This code sets the `nginx.ingress.kubernetes.io/ssl-redirect` annotation.
+    In Gateway API, TLS redirect is a native feature using the RequestRedirect
+    filter — no annotations needed.
+
+    Per the official migration guide, replace the annotation with an HTTPRoute
+    that redirects HTTP to HTTPS:
+
+      // HTTPS listener on the Gateway
+      httpsListener := gatewayv1.Listener{
+          Name:     "https",
+          Port:     443,
+          Protocol: gatewayv1.HTTPSProtocolType,
+          TLS: &gatewayv1.GatewayTLSConfig{
+              Mode: ptr(gatewayv1.TLSModeTerminate),
+              CertificateRefs: []gatewayv1.SecretObjectReference{
+                  {Name: "tls-secret"},
+              },
+          },
+      }
+
+      // HTTPRoute on the HTTP listener that redirects to HTTPS
+      redirectRule := gatewayv1.HTTPRouteRule{
+          Filters: []gatewayv1.HTTPRouteFilter{
+              {
+                  Type: gatewayv1.HTTPRouteFilterRequestRedirect,
+                  RequestRedirect: &gatewayv1.HTTPRequestRedirectFilter{
+                      Scheme: ptr("https"),
+                      Port:   ptr(gatewayv1.PortNumber(443)),
+                  },
+              },
+          },
+      }
+
+    Remove this annotation from the Go code entirely.
+
+- ruleID: ingress-nginx-go-ref-00022
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 5
+  category: mandatory
+  description: "Go code sets nginx.ingress.kubernetes.io/configuration-snippet annotation"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/configuration-snippet'
+      filePattern: "*.go"
+  message: |
+    This code sets the `nginx.ingress.kubernetes.io/configuration-snippet`
+    annotation, which injects raw NGINX configuration. This is a KNOWN SECURITY
+    RISK (CVE-2021-25742 and others) and has no direct Gateway API equivalent.
+
+    You must refactor the snippet content into Gateway API-native features:
+    - Custom headers -> HTTPRoute `ResponseHeaderModifier` filter
+    - Proxy headers  -> HTTPRoute `RequestHeaderModifier` filter
+    - Redirect rules -> HTTPRoute `RequestRedirect` filter
+
+    Example replacing custom headers:
+      filter := gatewayv1.HTTPRouteFilter{
+          Type: gatewayv1.HTTPRouteFilterResponseHeaderModifier,
+          ResponseHeaderModifier: &gatewayv1.HTTPHeaderFilter{
+              Set: []gatewayv1.HTTPHeader{
+                  {Name: "X-Frame-Options", Value: "DENY"},
+                  {Name: "X-Content-Type-Options", Value: "nosniff"},
+              },
+          },
+      }
+
+    The Ingress-NGINX retirement announcement specifically calls out snippets
+    as a "serious security flaw." For features with no Gateway API standard
+    equivalent, use policy attachment CRDs specific to your Gateway API
+    implementation.
+
+    Remove the annotation and the snippet string from the Go code entirely.
+
+- ruleID: ingress-nginx-go-ref-00023
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 5
+  category: mandatory
+  description: "Go code sets nginx.ingress.kubernetes.io/server-snippet annotation"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/server-snippet'
+      filePattern: "*.go"
+  message: |
+    This code sets the `nginx.ingress.kubernetes.io/server-snippet` annotation,
+    which injects raw NGINX server block configuration. The Ingress-NGINX
+    retirement announcement specifically calls out snippets as a "serious
+    security flaw." This has no Gateway API equivalent.
+
+    Refactor the snippet content into Gateway API-native features where possible:
+    - Health check endpoints -> Separate Service + HTTPRoute
+    - Status endpoints      -> Separate Service + HTTPRoute
+    - Custom headers        -> HTTPRoute ResponseHeaderModifier filter
+    - Access control        -> For features with no standard equivalent, use
+                               policy attachment CRDs specific to your
+                               Gateway API implementation
+
+    Remove the annotation and the snippet string from the Go code entirely.
+
+- ruleID: ingress-nginx-go-ref-00024
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 3
+  category: mandatory
+  description: "Go code sets nginx.ingress.kubernetes.io/canary annotation"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/canary'
+      filePattern: "*.go"
+  message: |
+    This code uses nginx-ingress canary annotations for traffic splitting.
+    The official migration guide lists traffic splitting as a key feature
+    that moves from annotation-based to native Gateway API support. Migrate
+    to HTTPRoute's native weighted backendRefs.
+
+    Replace canary annotations with HTTPRoute backendRef weights:
+      rule := gatewayv1.HTTPRouteRule{
+          Matches: []gatewayv1.HTTPRouteMatch{...},
+          BackendRefs: []gatewayv1.HTTPBackendRef{
+              {
+                  BackendRef: gatewayv1.BackendRef{
+                      BackendObjectReference: gatewayv1.BackendObjectReference{
+                          Name: "app-stable",
+                          Port: ptr(gatewayv1.PortNumber(80)),
+                      },
+                      Weight: ptr(int32(80)),
+                  },
+              },
+              {
+                  BackendRef: gatewayv1.BackendRef{
+                      BackendObjectReference: gatewayv1.BackendObjectReference{
+                          Name: "app-canary",
+                          Port: ptr(gatewayv1.PortNumber(80)),
+                      },
+                      Weight: ptr(int32(20)),
+                  },
+              },
+          },
+      }
+
+    For header-based canary routing, use HTTPRoute header matches:
+      match := gatewayv1.HTTPRouteMatch{
+          Headers: []gatewayv1.HTTPHeaderMatch{
+              {
+                  Name:  "X-Canary",
+                  Value: "always",
+              },
+          },
+      }
+
+    Remove all canary-related annotations from the Go code.
+
+- ruleID: ingress-nginx-go-ref-00025
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: mandatory
+  description: "Go code sets nginx CORS annotations (enable-cors, cors-allow-*)"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/(enable-cors|cors-allow)'
+      filePattern: "*.go"
+  message: |
+    This code enables CORS via nginx-ingress annotations. Gateway API has a
+    native CORS field on HTTPRouteRule (GEP-1767, experimental in v1.3).
+
+    Replace CORS annotations with the native HTTPRoute CORS field:
+      rule := gatewayv1.HTTPRouteRule{
+          CORS: &gatewayv1.HTTPCORS{
+              AllowOrigins: []gatewayv1.Origin{"https://shop.orcapod.io"},
+              AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+              AllowHeaders: []string{"Content-Type", "Authorization"},
+          },
+          Matches:     []gatewayv1.HTTPRouteMatch{...},
+          BackendRefs: []gatewayv1.HTTPBackendRef{...},
+      }
+
+    Remove all CORS-related annotations (enable-cors, cors-allow-origin,
+    cors-allow-methods, cors-allow-headers) from the Go code.
+  links:
+    - url: "https://gateway-api.sigs.k8s.io/geps/gep-1767/"
+      title: "GEP-1767: CORS Filter"
+
+- ruleID: ingress-nginx-go-ref-00026
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: optional
+  description: "Go code sets nginx.ingress.kubernetes.io/limit-rps or limit-rpm annotation"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/limit-rp[sm]'
+      filePattern: "*.go"
+  message: |
+    This code uses nginx-ingress rate limiting annotations. Gateway API does
+    not have a standard rate limiting API yet. Use your implementation's
+    policy CRDs:
+
+    - Envoy Gateway: BackendTrafficPolicy with rateLimit
+    - Istio: EnvoyFilter or WasmPlugin
+    - NGINX Gateway Fabric: Policy attachment
+
+    Remove the rate limit annotations from the Go code and create the
+    appropriate implementation-specific policy resource instead.
+
+- ruleID: ingress-nginx-go-ref-00027
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 3
+  category: optional
+  description: "Go code sets nginx auth annotations (auth-type, auth-url, auth-secret, auth-signin, etc.)"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/auth-'
+      filePattern: "*.go"
+  message: |
+    This code uses nginx-ingress authentication annotations (basic auth or
+    external auth). Gateway API does not have a standard auth API.
+
+    Use your implementation's policy CRDs:
+    - Envoy Gateway: SecurityPolicy with basicAuth or extAuth
+    - Istio: RequestAuthentication + AuthorizationPolicy
+    - NGINX Gateway Fabric: Policy attachment
+
+    Remove all auth-related annotations (auth-type, auth-secret, auth-realm,
+    auth-url, auth-signin, auth-response-headers) from the Go code and create
+    the appropriate implementation-specific auth policy resource instead.
+
+- ruleID: ingress-nginx-go-ref-00028
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 1
+  category: mandatory
+  description: "Go code sets nginx proxy-read-timeout, proxy-send-timeout, or proxy-connect-timeout annotation"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/proxy-(read|send|connect)-timeout'
+      filePattern: "*.go"
+  message: |
+    This code sets proxy timeout annotations. Gateway API HTTPRoute supports
+    native timeout configuration — no implementation-specific workarounds needed.
+
+    Replace proxy timeout annotations with HTTPRoute timeouts:
+      rule := gatewayv1.HTTPRouteRule{
+          Timeouts: &gatewayv1.HTTPRouteTimeouts{
+              Request:       ptr(gatewayv1.Duration("60s")),
+              BackendRequest: ptr(gatewayv1.Duration("30s")),
+          },
+          ...
+      }
+
+    Remove the proxy timeout annotations from the Go code.
+
+- ruleID: ingress-nginx-go-ref-00029
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: optional
+  description: "Go code sets nginx affinity or session-cookie annotations"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/(affinity|session-cookie)'
+      filePattern: "*.go"
+  message: |
+    This code uses nginx-ingress session affinity annotations. Gateway API
+    does not have a standard session persistence API yet.
+
+    Use your implementation's policy CRDs:
+    - Envoy Gateway: BackendTrafficPolicy with sessionPersistence
+    - Istio: DestinationRule with consistentHash
+    - NGINX Gateway Fabric: Policy attachment
+
+    Remove all affinity and session cookie annotations (affinity, affinity-mode,
+    session-cookie-name, session-cookie-max-age) from the Go code.
+
+- ruleID: ingress-nginx-go-ref-00030
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: optional
+  description: "Go code sets nginx.ingress.kubernetes.io/whitelist-source-range annotation"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/whitelist-source-range'
+      filePattern: "*.go"
+  message: |
+    This code uses the whitelist-source-range annotation for IP-based access
+    control. Gateway API does not have a standard IP allowlist API.
+
+    Use your implementation's policy CRDs:
+    - Envoy Gateway: SecurityPolicy with clientIPDetection
+    - Istio: AuthorizationPolicy with source.ipBlocks
+    - NGINX Gateway Fabric: Policy attachment
+
+    Remove the whitelist annotation from the Go code.
+
+- ruleID: ingress-nginx-go-ref-00031
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 1
+  category: mandatory
+  description: "Go code sets nginx HSTS annotations (hsts, hsts-max-age, hsts-include-subdomains)"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/hsts'
+      filePattern: "*.go"
+  message: |
+    This code sets HSTS via nginx-ingress annotations. In Gateway API, HSTS is
+    configured natively using the ResponseHeaderModifier filter to set the
+    `Strict-Transport-Security` header.
+
+    Replace HSTS annotations with an HTTPRoute ResponseHeaderModifier filter:
+      filter := gatewayv1.HTTPRouteFilter{
+          Type: gatewayv1.HTTPRouteFilterResponseHeaderModifier,
+          ResponseHeaderModifier: &gatewayv1.HTTPHeaderFilter{
+              Set: []gatewayv1.HTTPHeader{
+                  {
+                      Name:  "Strict-Transport-Security",
+                      Value: "max-age=31536000; includeSubDomains",
+                  },
+              },
+          },
+      }
+
+    Remove the hsts, hsts-max-age, and hsts-include-subdomains annotations
+    from the Go code.
+  links:
+    - url: "https://gateway-api.sigs.k8s.io/guides/http-header-modifier/"
+      title: "HTTP Header Modifier"
+
+- ruleID: ingress-nginx-go-ref-00032
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: optional
+  description: "Go code sets nginx.ingress.kubernetes.io/proxy-body-size annotation"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/proxy-body-size'
+      filePattern: "*.go"
+  message: |
+    This code sets the `nginx.ingress.kubernetes.io/proxy-body-size` annotation
+    to limit request body size. Gateway API does not have a standard request
+    body size limit field.
+
+    Use your implementation's policy CRDs:
+    - Envoy Gateway: BackendTrafficPolicy or ClientTrafficPolicy
+    - Istio: EnvoyFilter
+    - NGINX Gateway Fabric: Policy attachment
+
+    Remove the proxy-body-size annotation from the Go code and create the
+    appropriate implementation-specific policy resource instead.
+
+- ruleID: ingress-nginx-go-ref-00033
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 2
+  category: optional
+  description: "Go code sets nginx.ingress.kubernetes.io/proxy-http-version annotation for WebSocket"
+  when:
+    builtin.filecontent:
+      pattern: 'nginx\.ingress\.kubernetes\.io/proxy-http-version'
+      filePattern: "*.go"
+  message: |
+    This code sets the `nginx.ingress.kubernetes.io/proxy-http-version`
+    annotation, typically to enable WebSocket support (HTTP/1.1 with Upgrade).
+    Gateway API does not have a standard WebSocket configuration field.
+
+    Use your implementation's policy CRDs or WebSocket support:
+    - Envoy Gateway: Supports WebSocket by default on HTTPRoute
+    - Istio: Supports WebSocket by default
+    - NGINX Gateway Fabric: Supports WebSocket by default
+
+    Most Gateway API implementations support WebSocket natively without
+    extra configuration. Remove the proxy-http-version annotation from the
+    Go code.
+
+# -------------------------------------------------------------------
+# Group 5: Ingress class annotation in Go code
+# -------------------------------------------------------------------
+
+- ruleID: ingress-nginx-go-ref-00040
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 1
+  category: mandatory
+  description: "Go code sets the kubernetes.io/ingress.class annotation to nginx"
+  when:
+    builtin.filecontent:
+      pattern: '"kubernetes\.io/ingress\.class":\s*"nginx"'
+      filePattern: "*.go"
+  message: |
+    This code sets the deprecated `kubernetes.io/ingress.class: "nginx"` annotation.
+    In Gateway API, the route references a Gateway via `parentRefs` instead:
+
+    Replace:
+      annotations["kubernetes.io/ingress.class"] = "nginx"
+
+    With HTTPRoute parentRefs:
+      spec := gatewayv1.HTTPRouteSpec{
+          CommonRouteSpec: gatewayv1.CommonRouteSpec{
+              ParentRefs: []gatewayv1.ParentReference{
+                  {Name: gatewayv1.ObjectName("my-gateway")},
+              },
+          },
+      }
+
+    Remove the annotation entirely.
+
+- ruleID: ingress-nginx-go-ref-00041
+  labels:
+    - "konveyor.io/source=go"
+    - "konveyor.io/target=go"
+  effort: 1
+  category: mandatory
+  description: "Go code references the ingress-nginx controller string"
+  when:
+    builtin.filecontent:
+      pattern: 'k8s\.io/ingress-nginx'
+      filePattern: "*.go"
+  message: |
+    This code references the `k8s.io/ingress-nginx` controller identifier.
+    Replace with your chosen Gateway API implementation's controller name:
+
+    - Envoy Gateway:       "gateway.envoyproxy.io/gatewayclass-controller"
+    - Istio:               "istio.io/gateway-controller"
+    - NGINX Gateway Fabric: "gateway.nginx.org/nginx-gateway-controller"
+    - Cilium:              "io.cilium/gateway-controller"
+
+    Replace:
+      Controller: "k8s.io/ingress-nginx"
+
+    With:
+      ControllerName: "gateway.envoyproxy.io/gatewayclass-controller"

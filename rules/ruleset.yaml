@@ -1,0 +1,9 @@
+name: ingress-nginx-to-gateway-api
+description: >
+  Rules for detecting Ingress-NGINX usage in Go source code. Ingress-NGINX is
+  being retired in March 2026. These rules identify Go types, client-go API calls,
+  and nginx annotation string literals that must be migrated to Kubernetes Gateway
+  API (Gateway, HTTPRoute, GatewayClass).
+labels:
+  - "konveyor.io/source=go"
+  - "konveyor.io/target=go"
