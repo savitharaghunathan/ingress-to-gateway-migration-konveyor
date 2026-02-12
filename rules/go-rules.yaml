@@ -259,13 +259,22 @@
           },
       }
 
-    With:
+    With (note: HTTPBackendRef wraps BackendRef which wraps BackendObjectReference):
       backendRef := gatewayv1.HTTPBackendRef{
-          BackendRef: gatewayv1.BackendRef{
+          BackendRef: gatewayv1.BackendRef{                          // required wrapper
               BackendObjectReference: gatewayv1.BackendObjectReference{
                   Name: gatewayv1.ObjectName("my-service"),
                   Port: ptr(gatewayv1.PortNumber(8080)),
               },
+          },
+      }
+
+    Do NOT set BackendObjectReference directly on HTTPBackendRef — it must
+    be nested inside BackendRef. Weight is also set on BackendRef:
+      backendRef := gatewayv1.HTTPBackendRef{
+          BackendRef: gatewayv1.BackendRef{
+              BackendObjectReference: gatewayv1.BackendObjectReference{...},
+              Weight: ptr(int32(80)),
           },
       }
   links:
@@ -436,6 +445,7 @@
                   Type: gatewayv1.HTTPRouteFilterURLRewrite,
                   URLRewrite: &gatewayv1.HTTPURLRewriteFilter{
                       Path: &gatewayv1.HTTPPathModifier{
+                          // Use gatewayv1.PrefixMatchHTTPPathModifier (not ReplacePrefixMatch*)
                           Type:               gatewayv1.PrefixMatchHTTPPathModifier,
                           ReplacePrefixMatch: ptr("/"),
                       },
@@ -444,6 +454,10 @@
           },
           BackendRefs: []gatewayv1.HTTPBackendRef{...},
       }
+
+    The two HTTPPathModifier types are:
+      gatewayv1.PrefixMatchHTTPPathModifier  — replaces the matched prefix
+      gatewayv1.FullPathHTTPPathModifier     — replaces the entire path
 
     Also remove the `use-regex` annotation — Gateway API uses typed path
     matching (PathPrefix, Exact) instead of a regex annotation.
@@ -629,25 +643,37 @@
       pattern: 'nginx\.ingress\.kubernetes\.io/(enable-cors|cors-allow)'
       filePattern: "*.go"
   message: |
-    This code enables CORS via nginx-ingress annotations. Gateway API has a
-    native CORS field on HTTPRouteRule (GEP-1767, experimental in v1.3).
+    This code enables CORS via nginx-ingress annotations. Gateway API does not
+    yet have a standard CORS API in the stable v1 package (GEP-1767 is still
+    experimental). Use your implementation's policy CRDs:
 
-    Replace CORS annotations with the native HTTPRoute CORS field:
-      rule := gatewayv1.HTTPRouteRule{
-          CORS: &gatewayv1.HTTPCORS{
-              AllowOrigins: []gatewayv1.Origin{"https://shop.orcapod.io"},
-              AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-              AllowHeaders: []string{"Content-Type", "Authorization"},
-          },
-          Matches:     []gatewayv1.HTTPRouteMatch{...},
-          BackendRefs: []gatewayv1.HTTPBackendRef{...},
-      }
+    - Envoy Gateway: SecurityPolicy with cors
+    - Istio: CorsPolicy on VirtualService or via EnvoyFilter
+    - NGINX Gateway Fabric: Policy attachment
+
+    Example with Envoy Gateway SecurityPolicy (applied alongside the HTTPRoute):
+      apiVersion: gateway.envoyproxy.io/v1alpha1
+      kind: SecurityPolicy
+      metadata:
+        name: cors-policy
+      spec:
+        targetRefs:
+          - group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: my-route
+        cors:
+          allowOrigins:
+            - type: Exact
+              value: "https://example.com"
+          allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+          allowHeaders: ["Content-Type", "Authorization"]
 
     Remove all CORS-related annotations (enable-cors, cors-allow-origin,
-    cors-allow-methods, cors-allow-headers) from the Go code.
+    cors-allow-methods, cors-allow-headers) from the Go code and create
+    the appropriate implementation-specific CORS policy resource instead.
   links:
     - url: "https://gateway-api.sigs.k8s.io/geps/gep-1767/"
-      title: "GEP-1767: CORS Filter"
+      title: "GEP-1767: CORS Filter (experimental)"
 
 - ruleID: ingress-nginx-go-ref-00026
   labels:
