@@ -74,3 +74,7 @@ The sample app triggers 16 of 26 rules (38 incidents). The remaining 10 rules co
 5. **Review violations** — the analyzer will flag nginx-ingress patterns in the Go source files.
 
 6. **Use KAI** — click "Get Solution" on any violation to generate the Gateway API equivalent code.
+
+---
+
+This project was built with assistance from [Claude Code](https://claude.ai/claude-code).
