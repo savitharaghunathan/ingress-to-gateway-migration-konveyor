@@ -17,12 +17,8 @@
     go.referenced:
       pattern: '\bIngress\b'
   message: |
-    This code references `networkingv1.Ingress`. Ingress-NGINX is being retired
-    in March 2026 with no further security patches.
-
-    In Gateway API, a single Ingress resource is split into two resources:
-    - `Gateway` — defines the listener/entrypoint (managed by cluster operators)
-    - `HTTPRoute` — defines routing rules (managed by application developers)
+    This code references `networkingv1.Ingress`. Migrate to
+    `gatewayv1.HTTPRoute`.
 
     Replace:
       import networkingv1 "k8s.io/api/networking/v1"
@@ -31,16 +27,7 @@
     With:
       import gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
       var route *gatewayv1.HTTPRoute
-
-    You can use the `ingress2gateway` tool to automate initial conversion:
-      https://github.com/kubernetes-sigs/ingress2gateway
-
-    You can run a Gateway API controller alongside your existing Ingress-NGINX
-    controller during migration. Each gets a separate external IP, enabling
-    isolated testing without impacting production.
   links:
-    - url: "https://gateway-api.sigs.k8s.io/guides/getting-started/migrating-from-ingress/"
-      title: "Migrating from Ingress to Gateway API"
     - url: "https://gateway-api.sigs.k8s.io/api-types/httproute/"
       title: "HTTPRoute API Reference"
 
