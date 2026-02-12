@@ -33,17 +33,15 @@ Konveyor with KAI addresses this gap:
 
 ## What This Consists Of
 
-### Sample Application (`go-app/`)
+### Sample Application (`go-app-v2/`)
 
-A Go CLI tool (`orcapod-ingress-provisioner`) that a platform team uses to provision standardized Ingress resources for tenant applications. It exercises real-world nginx-ingress patterns:
+A Go CLI tool (`orcapod-ingress-provisioner`) that a platform team uses to provision standardized Ingress resources for tenant applications using nginx-ingress:
 
-| File | What It Does |
-|---|---|
-| `main.go` | Entry point — provisions ingresses for the storefront, admin dashboard, and a canary deployment |
-| `ingress_manager.go` | CRUD operations via client-go, builder functions for TLS, rewrite, canary, auth, session affinity, HSTS, WebSocket, IP allowlisting, and configuration snippets |
-| `ingress_helpers.go` | Config-driven builder, validation, nginx annotation utilities, ingress merging |
+- **Core types**: `Ingress`, `IngressSpec`, `IngressRule`, `IngressTLS`, `IngressClass`, `IngressClassSpec`, `IngressBackend`, `IngressServiceBackend`, `ServiceBackendPort`, `HTTPIngressPath`, `HTTPIngressRuleValue`, `PathTypePrefix`
+- **Client-go API**: `NetworkingV1().Ingresses()`, `NetworkingV1().IngressClasses()`
+- **Annotations**: ssl-redirect, configuration-snippet (response headers), proxy-read-timeout, proxy-send-timeout, hsts/hsts-max-age/hsts-include-subdomains, kubernetes.io/ingress.class, k8s.io/ingress-nginx controller
 
-The app uses `k8s.io/api v0.31.0` and `k8s.io/client-go v0.31.0`.
+The app is a single file (`main.go`) using `k8s.io/api v0.31.0` and `k8s.io/client-go v0.31.0`.
 
 ### Konveyor Rules (`rules/`)
 
@@ -54,6 +52,8 @@ The app uses `k8s.io/api v0.31.0` and `k8s.io/client-go v0.31.0`.
 
 Every rule includes a `message` with concrete before/after Go code examples and links to the official Gateway API migration guide. KAI uses these messages to generate migration fixes via LLM.
 
+The sample app triggers 16 of 26 rules (38 incidents). The remaining 10 rules cover patterns not used in the sample app (canary, CORS, rewrite, auth, rate limiting, session affinity, server-snippet, IP allowlisting, proxy-body-size, WebSocket).
+
 ## How to Use
 
 ### Prerequisites
@@ -63,7 +63,7 @@ Every rule includes a `message` with concrete before/after Go code examples and 
 
 ### Steps
 
-1. **Open the `go-app/` directory** in VSCode as the workspace root (or open the parent `nginx_migration/` directory).
+1. **Open the `go-app-v2/` directory** in VSCode as the workspace root (or open the parent `nginx_migration/` directory).
 
 2. **Add the custom rules** — go to Settings > search for `Konveyor > Analysis: Custom Rules` > click `Add Item` > enter the absolute path to the `rules/` directory.
 
@@ -73,5 +73,4 @@ Every rule includes a `message` with concrete before/after Go code examples and 
 
 5. **Review violations** — the analyzer will flag nginx-ingress patterns in the Go source files.
 
-6. **Use KAI** — click "Get Solution" on any violation. KAI sends the rule's message (with before/after examples) to the LLM, which generates the Gateway API equivalent code. 
-
+6. **Use KAI** — click "Get Solution" on any violation to generate the Gateway API equivalent code.
