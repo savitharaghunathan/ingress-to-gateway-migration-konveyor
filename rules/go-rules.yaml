@@ -15,7 +15,7 @@
   description: "Go code references networkingv1.Ingress type"
   when:
     go.referenced:
-      pattern: "k8s.io/api/networking/v1.Ingress"
+      pattern: '\bIngress\b'
   message: |
     This code references `networkingv1.Ingress`. Ingress-NGINX is being retired
     in March 2026 with no further security patches.
@@ -53,7 +53,7 @@
   description: "Go code references networkingv1.IngressSpec type"
   when:
     go.referenced:
-      pattern: "k8s.io/api/networking/v1.IngressSpec"
+      pattern: '\bIngressSpec\b'
   message: |
     This code references `networkingv1.IngressSpec`. Migrate to
     `gatewayv1.HTTPRouteSpec`.
@@ -97,7 +97,7 @@
   description: "Go code references networkingv1.IngressRule type"
   when:
     go.referenced:
-      pattern: "k8s.io/api/networking/v1.IngressRule"
+      pattern: '\bIngressRule\b'
   message: |
     This code references `networkingv1.IngressRule`. Migrate to
     `gatewayv1.HTTPRouteRule`.
@@ -171,7 +171,7 @@
   description: "Go code references networkingv1.IngressTLS type"
   when:
     go.referenced:
-      pattern: "k8s.io/api/networking/v1.IngressTLS"
+      pattern: '\bIngressTLS\b'
   message: |
     This code references `networkingv1.IngressTLS`. In Gateway API, TLS
     configuration moves from the route to the Gateway listener. This is a
@@ -213,7 +213,7 @@
   description: "Go code references networkingv1.IngressClass type"
   when:
     go.referenced:
-      pattern: "k8s.io/api/networking/v1.IngressClass"
+      pattern: '\bIngressClass\b'
   message: |
     This code references `networkingv1.IngressClass`. Migrate to
     `gatewayv1.GatewayClass`.
@@ -246,7 +246,7 @@
   description: "Go code references networkingv1.IngressBackend type"
   when:
     go.referenced:
-      pattern: "k8s.io/api/networking/v1.IngressBackend"
+      pattern: '\bIngressBackend\b'
   message: |
     This code references `networkingv1.IngressBackend`. Migrate to
     `gatewayv1.HTTPBackendRef`.
@@ -281,7 +281,7 @@
   description: "Go code references networkingv1.HTTPIngressPath type"
   when:
     go.referenced:
-      pattern: "k8s.io/api/networking/v1.HTTPIngressPath"
+      pattern: '\bHTTPIngressPath\b'
   message: |
     This code references `networkingv1.HTTPIngressPath`. Migrate to
     `gatewayv1.HTTPRouteMatch` + `gatewayv1.HTTPBackendRef`.
@@ -316,7 +316,7 @@
   description: "Go code references networkingv1.HTTPIngressRuleValue type"
   when:
     go.referenced:
-      pattern: "k8s.io/api/networking/v1.HTTPIngressRuleValue"
+      pattern: '\bHTTPIngressRuleValue\b'
   message: |
     This code references `networkingv1.HTTPIngressRuleValue`. This type has
     no direct Gateway API equivalent. The HTTP paths list becomes

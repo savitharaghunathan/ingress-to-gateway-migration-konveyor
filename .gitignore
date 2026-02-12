@@ -1,0 +1,10 @@
+# Compiled binaries
+go-app/ingress-provisioner
+
+# Kantra analysis output
+kantra-output/
+
+# Local configuration files
+PLAN.md
+.claude/
+.vscode/
